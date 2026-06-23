@@ -976,7 +976,20 @@
     <button onclick="quickAdd()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:var(--gold);border:none;border-radius:5px;padding:3px 8px;font-size:12px;font-weight:700;color:#000;cursor:pointer">OK</button>
   </div>
   <button class="btn btn-outline" id="sort-btn" onclick="toggleSort()" title="Changer le tri des équipes">📋 Ordre album</button>
-  <button class="btn btn-gold" onclick="exportExcel()">📥 Exporter Excel</button>
+  <div style="position:relative;display:inline-block" id="export-wrap">
+    <button class="btn btn-gold" onclick="toggleExportMenu()">📥 Exporter ▾</button>
+    <div id="export-menu" style="display:none;position:absolute;top:110%;left:0;background:var(--bg2);border:1px solid var(--border);border-radius:10px;min-width:220px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden">
+      <button onclick="exportExcel();closeExportMenu()" style="width:100%;padding:12px 16px;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-family:Inter,sans-serif;font-size:13px;cursor:pointer;text-align:left;display:flex;align-items:center;gap:10px" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
+        📋 Export complet <span style="font-size:11px;color:var(--text2)">(toutes les vignettes)</span>
+      </button>
+      <button onclick="exportDoubles();closeExportMenu()" style="width:100%;padding:12px 16px;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-family:Inter,sans-serif;font-size:13px;cursor:pointer;text-align:left;display:flex;align-items:center;gap:10px" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
+        🔄 Mes doubles <span style="font-size:11px;color:var(--text2)">(à échanger)</span>
+      </button>
+      <button onclick="exportManquantes();closeExportMenu()" style="width:100%;padding:12px 16px;background:transparent;border:none;color:var(--text);font-family:Inter,sans-serif;font-size:13px;cursor:pointer;text-align:left;display:flex;align-items:center;gap:10px" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
+        ⭕ Mes manquantes <span style="font-size:11px;color:var(--text2)">(à trouver)</span>
+      </button>
+    </div>
+  </div>
   <label class="btn btn-outline" style="cursor:pointer" title="Importer un CSV exporté depuis cette app">
     📤 Importer CSV
     <input type="file" id="import-file" accept=".csv" style="display:none" onchange="importCSV(event)">
@@ -1706,15 +1719,8 @@ function exportExcel() {
   const csv = allRows.map(r => r.map(c => '"' + String(c||'').replace(/"/g,'""') + '"').join(';')).join('\n');
   
   // UTF-8 BOM for Excel
-  const bom = '\uFEFF';
-  const blob = new Blob([bom + csv], {type: 'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'panini_wc2026_album_' + new Date().toISOString().slice(0,10) + '.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-  showNotif('📥 Export Excel téléchargé !');
+  downloadCSV('\uFEFF' + csv, 'panini-wc2026.csv');
+  showNotif('📥 Export complet téléchargé !');
 }
 
 // ======= SAISIE RAPIDE =======
@@ -1898,6 +1904,74 @@ function analyserAmi() {
       </div>
     </div>`;
   box.scrollIntoView({behavior:'smooth'});
+}
+
+
+// ======= EXPORT MENU =======
+function toggleExportMenu() {
+  const m = document.getElementById('export-menu');
+  m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}
+function closeExportMenu() {
+  document.getElementById('export-menu').style.display = 'none';
+}
+document.addEventListener('click', e => {
+  if (!document.getElementById('export-wrap').contains(e.target)) closeExportMenu();
+});
+
+function exportDoubles() {
+  const rows = [['FIFA WORLD CUP 2026 — MES DOUBLES À ÉCHANGER']];
+  const stats = getStats();
+  rows.push(['Généré le', new Date().toLocaleDateString('fr-FR'), 'Progression:', Math.round(stats.owned/stats.total*100)+'%', stats.owned+'/'+stats.total]);
+  rows.push([]);
+  rows.push(['Code', 'Équipe', 'Joueur', 'Quantité en double']);
+
+  let hasDoubles = false;
+  TEAMS.forEach(t => {
+    t.stickers.forEach(s => {
+      const dbl = state.doubles[s.id] || 0;
+      if (dbl > 0) {
+        rows.push([s.id, t.name, s.name, dbl]);
+        hasDoubles = true;
+      }
+    });
+  });
+
+  if (!hasDoubles) { showNotif('❌ Tu n'as aucun double pour l'instant !', true); return; }
+
+  const csv = rows.map(r => r.map(c => '"' + String(c||'').replace(/"/g,'""') + '"').join(';')).join('
+');
+  downloadCSV('﻿' + csv, 'panini-wc2026-doubles.csv');
+  showNotif('📥 Export doubles téléchargé !');
+}
+
+function exportManquantes() {
+  const rows = [['FIFA WORLD CUP 2026 — MES VIGNETTES MANQUANTES']];
+  const stats = getStats();
+  rows.push(['Généré le', new Date().toLocaleDateString('fr-FR'), 'Progression:', Math.round(stats.owned/stats.total*100)+'%', stats.missing+' manquantes sur '+stats.total]);
+  rows.push([]);
+  rows.push(['Code', 'Équipe', 'Joueur / Description']);
+
+  TEAMS.forEach(t => {
+    t.stickers.forEach(s => {
+      if (!state.owned[s.id]) rows.push([s.id, t.name, s.name]);
+    });
+  });
+
+  const csv = rows.map(r => r.map(c => '"' + String(c||'').replace(/"/g,'""') + '"').join(';')).join('
+');
+  downloadCSV('﻿' + csv, 'panini-wc2026-manquantes.csv');
+  showNotif('📥 Export manquantes téléchargé !');
+}
+
+function downloadCSV(content, filename) {
+  const blob = new Blob([content], {type: 'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ======= IMPORT CSV =======
